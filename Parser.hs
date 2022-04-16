@@ -2,13 +2,14 @@ module Parser where
 
 import Text.Parsec.String ( Parser )
 import Text.Parsec.Char
-    ( char, alphaNum, letter, lower, noneOf, spaces, string, upper )
+    ( char, alphaNum, letter, lower, noneOf, spaces, string, upper, oneOf )
 import Data.Char ()
 import Text.Parsec.Combinator
     ( anyToken, eof, many1, manyTill, sepBy, choice, count, optional, chainl, sepBy1, option )
 import Text.Parsec ( ParseError, (<|>), many, parse, digit )
 import Text.ParserCombinators.Parsec.Token ()
-import Language.Haskell.TH (RuleBndr)
+import System.IO ( openFile, hGetContents, IOMode(ReadMode) )
+import GHC.IO
 
 newtype Variable = Variable [Char] deriving (Eq, Show)
 newtype Atom = Atom [Char] deriving (Eq, Show)
@@ -19,7 +20,7 @@ data Term
   deriving (Eq, Show)
 
 type ArgList = [Term]
-data ProFunctor = ProFunctor Atom ArgList deriving (Eq, Show)
+data ProFunctor = ProFunctor Term ArgList deriving (Eq, Show)
 
 data ProList
   = PLTerms  [Term]
@@ -45,6 +46,9 @@ data Statement
 
 newtype Program = Program [Statement] deriving (Eq, Show)
 
+parseProlog :: String -> Either ParseError Program
+parseProlog = regularParse prologProgram
+
 regularParse :: Parser a -> String -> Either ParseError a
 regularParse p = parse p ""
 
@@ -69,21 +73,21 @@ prologEmptyAtom = do
 prologQuoteAtom :: Parser Atom
 prologQuoteAtom = do
   char '\''
-  result <- many1 $ noneOf "\n'"
+  result <- manyTill anyToken (char '\'')
   char '\''
   return (Atom result)
 
 prologBareAtom :: Parser Atom
 prologBareAtom = do
   atomStart <- lower
-  atomRest <- option "" (many1 (alphaNum <|> char '_'))
+  atomRest <- many (alphaNum <|> char '_')
   return (Atom (atomStart : atomRest))
 
 prologNumber :: Parser Atom
 prologNumber = (do {
-  sign <- char '+'; number <- many1 digit; return (Atom (sign:number))
+  sign <- char '+'; number <- many digit; return (Atom (sign:number))
 }) <|> (do {
-  sign <- char '-'; number <- many1 digit; return (Atom (sign:number))
+  sign <- char '-'; number <- many digit; return (Atom (sign:number))
 }) <|> (do {
   number <- many1 digit; return (Atom number)
 })
@@ -101,14 +105,19 @@ prologArgSeperator  = do
   spaces
   return ()
 
-prologFunctor :: Parser ProFunctor
-prologFunctor = do
-  functor <- prologAtom
+prologFunctorFollow :: Parser [Term]
+prologFunctorFollow = do
   spaces
   char '('
   spaces
   arglist <- sepBy prologTerm prologArgSeperator
-  char ')'
+  char ')';
+  return arglist
+
+prologFunctor :: Parser ProFunctor
+prologFunctor = do
+  functor <- prologTerm
+  arglist <- option [] prologFunctorFollow
   return (ProFunctor functor arglist)
 
 prologString :: Parser [Char]
@@ -152,7 +161,10 @@ prologProList :: Parser ProList
 prologProList = PLTerms <$> prologList <|> PLString <$> prologString
 
 prologCompound :: Parser Compound
-prologCompound = PCProFunctor <$> prologFunctor <|> PCProList <$> prologProList <|> PCTerm <$> prologTerm
+prologCompound = choice [
+  PCProFunctor <$> prologFunctor,
+  PCProList <$> prologProList 
+  ]
 
 prologExpr :: Parser PExpr
 prologExpr = PExpr <$> prologCompound
@@ -188,5 +200,6 @@ prologStatement = do
   spaces
   (PSRule <$> prologRule) <|> (PSQuery <$> prologQuery)
 
---prologProgram :: Parser Program
-
+prologProgram :: Parser Program
+prologProgram = do
+  Program <$> sepBy prologStatement (many (do { spaces; char '\n'}))
