@@ -9,10 +9,15 @@ import Text.Parsec.Combinator
 import Text.Parsec ( ParseError, (<|>), many, parse, digit )
 import Text.ParserCombinators.Parsec.Token ()
 import System.IO ( openFile, hGetContents, IOMode(ReadMode) )
-import GHC.IO
 
-newtype Variable = Variable [Char] deriving (Eq, Show)
-newtype Atom = Atom [Char] deriving (Eq, Show)
+-- AST type definitions!!!!!!!!!!!!!
+
+newtype Variable = Variable {
+  varname :: [Char]
+} deriving (Eq, Show)
+newtype Atom = Atom {
+  atomname :: [Char]
+} deriving (Eq, Show)
 
 data Term
   = PTAtom     Atom
@@ -20,7 +25,10 @@ data Term
   deriving (Eq, Show)
 
 type ArgList = [Term]
-data ProFunctor = ProFunctor Term ArgList deriving (Eq, Show)
+data ProFunctor = ProFunctor {
+  name :: Term,
+  argList :: ArgList
+} deriving (Eq, Show)
 
 data ProList
   = PLTerms  [Term]
@@ -33,18 +41,34 @@ data Compound
   | PCTerm       Term
   deriving (Eq, Show)
 
-newtype PExpr = PExpr Compound deriving (Eq, Show)
+data PExpr
+  = PECompound Compound
+  | PEConjunct Compound
+  | PEDisjunct Compound
+  deriving (Eq, Show)
 
-data Rule = Rule Compound PExpr deriving (Eq, Show)
+data Rule = Rule {
+  ruleHead :: Compound,
+  ruleBody :: PExpr 
+} deriving (Eq, Show)
 
-newtype Query = Query Compound deriving (Eq, Show)
+newtype Query = Query {
+  queryBody :: Compound
+} deriving (Eq, Show)
 
 data Statement
   = PSRule Rule
   | PSQuery Query
   deriving (Eq, Show)
 
-newtype Program = Program [Statement] deriving (Eq, Show)
+type Program = [Statement]
+
+-- AST builder helpers
+
+createUnary :: String -> String -> Rule
+createUnary fname value = Rule (PCProFunctor (ProFunctor (PTAtom (Atom fname)) [PTAtom (Atom value)])) (PECompound (PCTerm (PTAtom (Atom "true"))))
+
+-- Parser!!!!!!!!!!!!!
 
 parseProlog :: String -> Either ParseError Program
 parseProlog = regularParse prologProgram
@@ -62,7 +86,7 @@ parseWithLeftOver p = parse ((,) <$> p <*> leftOver) ""
 prologVariable :: Parser Variable
 prologVariable = do
   varUpper <- upper <|> char '_';
-  varRest <- option "" (many1 alphaNum);
+  varRest <- many (alphaNum <|> char '_');
   return (Variable (varUpper : varRest))
 
 prologEmptyAtom :: Parser Atom
@@ -73,7 +97,7 @@ prologEmptyAtom = do
 prologQuoteAtom :: Parser Atom
 prologQuoteAtom = do
   char '\''
-  result <- manyTill anyToken (char '\'')
+  result <- many (noneOf "\'")
   char '\''
   return (Atom result)
 
@@ -100,17 +124,16 @@ prologTerm = PTAtom <$> prologAtom <|> PTVariable <$> prologVariable
 
 prologArgSeperator :: Parser ()
 prologArgSeperator  = do
-  spaces
   char ','
   spaces
-  return ()
 
 prologFunctorFollow :: Parser [Term]
 prologFunctorFollow = do
   spaces
   char '('
   spaces
-  arglist <- sepBy prologTerm prologArgSeperator
+  arglist <- prologTerm `sepBy` prologArgSeperator
+  spaces
   char ')';
   return arglist
 
@@ -167,7 +190,7 @@ prologCompound = choice [
   ]
 
 prologExpr :: Parser PExpr
-prologExpr = PExpr <$> prologCompound
+prologExpr = PECompound <$> prologCompound
 
 prologRule :: Parser Rule
 prologRule = do
@@ -186,14 +209,16 @@ prologRuleFollow = (do {
 }) <|> (do {
   spaces;
   char '.';
-  return (PExpr (PCTerm (PTAtom (Atom "true"))))
+  return (PECompound (PCTerm (PTAtom (Atom "true"))))
 })
 
 prologQuery :: Parser Query
 prologQuery = do
   string "?-"
   spaces
-  Query <$> prologCompound
+  result <- Query <$> prologCompound
+  char '.'
+  return result
 
 prologStatement :: Parser Statement
 prologStatement = do
@@ -202,4 +227,75 @@ prologStatement = do
 
 prologProgram :: Parser Program
 prologProgram = do
-  Program <$> sepBy prologStatement (many (do { spaces; char '\n'}))
+  sepBy prologStatement (many (do { spaces; char '\n'}))
+
+-- AST printers
+
+printVariable :: Variable -> IO ()
+printVariable = putStr . varname
+
+printAtom :: Atom -> IO ()
+printAtom = putStr . atomname
+
+printTerm :: Term -> IO ()
+printTerm (PTAtom atom)     = printAtom atom
+printTerm (PTVariable var)  = printVariable var
+
+printTermListStep :: Term -> [Term] -> IO ()
+printTermListStep curr rest = do
+  printTerm curr
+  case rest of
+    [] -> putStr ""
+    (next:nrest) -> (do {
+      putStr ", ";
+      printTermListStep next nrest 
+    })
+
+printArgList :: ArgList -> IO ()
+printArgList (top:rest) = printTermListStep top rest
+printArgList [] = putStr ""
+
+printFunctor :: ProFunctor -> IO ()
+printFunctor func = do
+  printTerm (name func)
+  putStr "("
+  printArgList (argList func)
+  putStr ")"
+
+printProList :: ProList -> IO ()
+printProList (PLString str) = putStr ("\"" ++ str ++ "\"")
+printProList (PLTerms (top:rest)) = do
+  putStr "["
+  printTermListStep top rest
+  putStr "]"
+printProList (PLTerms []) = putStr "[]"
+
+printCompound :: Compound -> IO ()
+printCompound (PCProFunctor func) = printFunctor func
+printCompound (PCProList plist) = printProList plist
+printCompound (PCTerm term) = printTerm term
+
+printPExpr :: PExpr -> IO ()
+printPExpr (PECompound comp) = printCompound comp
+printPExpr (PEConjunct comp) = printCompound comp
+printPExpr (PEDisjunct comp) = printCompound comp
+
+printRule :: Rule -> IO ()
+printRule rule = do
+  printCompound (ruleHead rule)
+  putStr " :- "
+  printPExpr (ruleBody rule)
+
+printQuery :: Query -> IO ()
+printQuery query = do
+  putStr "?- "
+  printCompound (queryBody query)
+
+printStatement :: Statement -> IO ()
+printStatement (PSRule rule) = do 
+  printRule rule
+  putStrLn "."
+printStatement (PSQuery query) = do
+  printQuery query
+  putStrLn "."
+
