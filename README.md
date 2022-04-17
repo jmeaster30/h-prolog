@@ -7,3 +7,4 @@ I have never coded in Haskell before and thought this would be a good project to
 
 - [ ] Add command history and cursor movement to the command line
 - [ ] Actually evaluate the rules and queries properly
+- [ ] Parse OR and AND expressions
