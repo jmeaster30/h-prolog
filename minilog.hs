@@ -8,11 +8,11 @@ import Database
       RuleSignature(RuleSignature),
       DbValue(DbRule, DbCustomFunction, DbBool),
       setDb, printDb )
-import Evaluator ( Result(Quit), evalProlog, EvalResult(result), printEvalResult )
+import Evaluator ( Result(Quit), evalProlog, EvalResult(evalResults, resultDb), printEvalResult, printEvalResults )
 import GHC.IO.Handle (hFlush)
 import GHC.IO.Handle.FD (stdout)
 
-initDb :: [Char] -> Database
+initDb :: String -> Database
 initDb cwd = 
   setDb (RuleSignature "true" 0)    (DbBool True) (
   setDb (RuleSignature "false" 0)   (DbBool False) (
@@ -24,8 +24,9 @@ initDb cwd =
   setDb (RuleSignature "number" 1)  (DbCustomFunction "number") (
   setDb (RuleSignature "integer" 1) (DbCustomFunction "integer") (
   setDb (RuleSignature "float" 1)   (DbCustomFunction "float") (
-  setDb (RuleSignature "negate" 1)  (DbCustomFunction "negate")
-  createDb))))))))))
+  setDb (RuleSignature "negate" 1)  (DbCustomFunction "negate") (
+  setDb (RuleSignature "load" 1)   (DbCustomFunction "load")
+  createDb)))))))))))
 
 loop :: Database -> IO ()
 loop db = do
@@ -33,10 +34,11 @@ loop db = do
   hFlush stdout
   line <- getLine
   let evalResult = evalProlog db (parseProlog line)
-  printEvalResult (last evalResult)
-  case result (last evalResult) of
+  let newDb = resultDb (last evalResult)
+  printEvalResults evalResult
+  case evalResults (last evalResult) of
     [Quit] -> putStrLn "Quitting minilog ..."
-    _      -> loop db
+    _      -> loop newDb
 
 main :: IO ()
 main = do
@@ -45,7 +47,6 @@ main = do
   putStrLn "| Prolog implementation in Haskell |"
   putStrLn "+==================================+"
   --TODO load files and default facts here
-  --TODO have database object that I can print here
   let db = initDb cwd
   putStrLn "Current Database:"
   printDb db

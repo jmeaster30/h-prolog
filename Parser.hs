@@ -13,10 +13,10 @@ import System.IO ( openFile, hGetContents, IOMode(ReadMode) )
 -- AST type definitions!!!!!!!!!!!!!
 
 newtype Variable = Variable {
-  varname :: [Char]
+  varname :: String
 } deriving (Eq, Show)
 newtype Atom = Atom {
-  atomname :: [Char]
+  atomname :: String
 } deriving (Eq, Show)
 
 data Term
@@ -26,13 +26,13 @@ data Term
 
 type ArgList = [Term]
 data ProFunctor = ProFunctor {
-  name :: Term,
+  funcName :: Term,
   argList :: ArgList
 } deriving (Eq, Show)
 
 data ProList
   = PLTerms  [Term]
-  | PLString [Char]
+  | PLString String
   deriving (Eq, Show)
 
 data Compound
@@ -41,15 +41,15 @@ data Compound
   | PCTerm       Term
   deriving (Eq, Show)
 
-data PExpr
-  = PECompound Compound
-  | PEConjunct Compound
-  | PEDisjunct Compound
+data BinaryExpr
+  = BEConjunct (Compound, Either BinaryExpr Compound)
+  | BEDisjunct (Compound, Either BinaryExpr Compound)
+  | BEPrimary  Compound
   deriving (Eq, Show)
 
 data Rule = Rule {
   ruleHead :: Compound,
-  ruleBody :: PExpr 
+  ruleBody :: BinaryExpr 
 } deriving (Eq, Show)
 
 newtype Query = Query {
@@ -66,7 +66,7 @@ type Program = [Statement]
 -- AST builder helpers
 
 createUnary :: String -> String -> Rule
-createUnary fname value = Rule (PCProFunctor (ProFunctor (PTAtom (Atom fname)) [PTAtom (Atom value)])) (PECompound (PCTerm (PTAtom (Atom "true"))))
+createUnary fname value = Rule (PCProFunctor (ProFunctor (PTAtom (Atom fname)) [PTAtom (Atom value)])) (BEPrimary (PCTerm (PTAtom (Atom "true"))))
 
 -- Parser!!!!!!!!!!!!!
 
@@ -143,20 +143,20 @@ prologFunctor = do
   arglist <- option [] prologFunctorFollow
   return (ProFunctor functor arglist)
 
-prologString :: Parser [Char]
+prologString :: Parser String
 prologString = do
   char '"'
   result <- manyTill anyToken (char '"')
   char '"'
   return result
 
-prologNestedList :: [Char] -> [Char] -> [Char] -> Parser [Term]
+prologNestedList :: String -> String -> String -> Parser [Term]
 prologNestedList left sep right = choice [
   count 1 prologTerm,
   prologNestedListRecurse left sep right
   ]
 
-prologNestedListRecurse :: [Char] -> [Char] -> [Char] -> Parser [Term]
+prologNestedListRecurse :: String -> String -> String -> Parser [Term]
 prologNestedListRecurse left sep right = do
   string left
   spaces
@@ -189,27 +189,46 @@ prologCompound = choice [
   PCProList <$> prologProList 
   ]
 
-prologExpr :: Parser PExpr
-prologExpr = PECompound <$> prologCompound
+prologBinaryFollow :: Compound -> Parser BinaryExpr
+prologBinaryFollow head = (do {
+  string ",";
+  spaces;
+  next <- prologCompound;
+  follow <- prologBinaryFollow next;
+  return (BEConjunct (head, Left follow))
+}) <|> (do {
+  string ";";
+  spaces;
+  next <- prologCompound;
+  follow <- prologBinaryFollow next;
+  return (BEConjunct (head, Left follow))
+}) <|> (do {
+  return (BEPrimary head)
+})
+
+prologBinaryExpr :: Parser BinaryExpr
+prologBinaryExpr = do
+  first <- prologCompound
+  spaces
+  prologBinaryFollow first
 
 prologRule :: Parser Rule
 prologRule = do
   head <- prologCompound
+  spaces
   Rule head <$> prologRuleFollow
 
-prologRuleFollow :: Parser PExpr
+prologRuleFollow :: Parser BinaryExpr
 prologRuleFollow = (do {
-  spaces;
   string ":-";
   spaces;
-  body <- prologExpr;
+  body <- prologBinaryExpr;
   spaces;
   char '.';
   return body
 }) <|> (do {
-  spaces;
   char '.';
-  return (PECompound (PCTerm (PTAtom (Atom "true"))))
+  return (BEPrimary (PCTerm (PTAtom (Atom "true"))))
 })
 
 prologQuery :: Parser Query
@@ -257,7 +276,7 @@ printArgList [] = putStr ""
 
 printFunctor :: ProFunctor -> IO ()
 printFunctor func = do
-  printTerm (name func)
+  printTerm (funcName func)
   putStr "("
   printArgList (argList func)
   putStr ")"
@@ -275,16 +294,26 @@ printCompound (PCProFunctor func) = printFunctor func
 printCompound (PCProList plist) = printProList plist
 printCompound (PCTerm term) = printTerm term
 
-printPExpr :: PExpr -> IO ()
-printPExpr (PECompound comp) = printCompound comp
-printPExpr (PEConjunct comp) = printCompound comp
-printPExpr (PEDisjunct comp) = printCompound comp
+printPBinaryExpr :: BinaryExpr -> IO ()
+printPBinaryExpr (BEConjunct (head, next)) = do
+  printCompound head
+  putStr ","
+  case next of
+    Left binaryExpr -> printPBinaryExpr binaryExpr
+    Right comp -> printCompound comp
+printPBinaryExpr (BEDisjunct (head, next)) = do
+  printCompound head
+  putStr ";"
+  case next of
+    Left binaryExpr -> printPBinaryExpr binaryExpr
+    Right comp -> printCompound comp
+printPBinaryExpr (BEPrimary comp) = printCompound comp
 
 printRule :: Rule -> IO ()
 printRule rule = do
   printCompound (ruleHead rule)
   putStr " :- "
-  printPExpr (ruleBody rule)
+  printPBinaryExpr (ruleBody rule)
 
 printQuery :: Query -> IO ()
 printQuery query = do
