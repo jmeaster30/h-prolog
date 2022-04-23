@@ -85,7 +85,6 @@ getFunctionSignature db stmt head =
       PTAtom atom -> Left (RuleSignature (atomname atom) 0)
       PTVariable var -> Right "Rule head cannot be a variable"
 
-
 evalRule :: Database -> Statement -> Rule -> [EvalResult]
 evalRule db stmt rule = do
   case getFunctionSignature db stmt (ruleHead rule) of
