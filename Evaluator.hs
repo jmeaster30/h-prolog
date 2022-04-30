@@ -86,7 +86,7 @@ mapRule db stmt query (DbRule rule) = do
   case result of
     Just bindings -> EvalResult db [Value [Solution stmt (Just rule) (Right (toBindings (resolveBindings queryVars bindings)))]]
     Nothing       -> EvalResult db [Value [Solution stmt (Just rule) (Left False)]]
-mapRule db stmt query other = EvalResult db [Value [Solution stmt Nothing (Left False)]]
+mapRule db stmt query other = EvalResult db [Value [Solution stmt Nothing (Left False)]] --TODO need to fix this for the other db value options
 
 applyTerm :: Map String Term -> Term -> Term
 applyTerm bindings term = case term of
