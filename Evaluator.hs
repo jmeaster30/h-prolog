@@ -1,7 +1,7 @@
 module Evaluator where
 
 import Database ( Database, setDb, RuleSignature (RuleSignature), DbValue (DbRule), getDb )
-import Parser ( Program, Statement (PSQuery, PSRule), printStatement, Query (queryBody), Rule (ruleHead, ruleBody), Compound (PCProFunctor, PCProList, PCTerm), Term (PTAtom, PTVariable), ProFunctor (funcName, argList), atomname, BinaryExpr, printRule, Atom (Atom), Variable (varname), ArgList )
+import Parser
 import Text.Parsec (ParseError)
 import System.Console.Terminfo (restoreDefaultColors)
 import GHC.IO.Handle (hFlush)
@@ -32,14 +32,23 @@ data EvalResult = EvalResult {
   evalResults :: [Result]
 } deriving (Eq, Show)
 
-zipTerms :: Term -> Term -> (String, Term)
-zipTerms a b = case a of
+zipQueryTerms :: Term -> Term -> (String, Term)
+zipQueryTerms a b = case a of
   PTAtom aatom -> case b of
-    PTAtom batom -> if aatom == batom then (atomname aatom, PTAtom batom) else ("", PTAtom (Atom ""))
-    PTVariable bvar -> (varname bvar, PTAtom aatom)
+    PTAtom batom -> ("", PTAtom (Atom ""))
+    PTVariable bvar -> ("", PTAtom (Atom ""))
   PTVariable avar -> case b of
     PTAtom batom -> (varname avar, PTAtom batom)
     PTVariable bvar -> (varname avar, PTVariable bvar)
+
+zipTerms :: Term -> Term -> (String, Term)
+zipTerms a b = case a of
+  PTAtom aatom -> case b of
+    PTAtom batom -> ("", PTAtom (Atom ""))
+    PTVariable bvar -> ("", PTAtom (Atom ""))
+  PTVariable avar -> case b of
+    PTAtom batom -> (varname avar, PTAtom batom)
+    PTVariable bvar -> ("", PTAtom (Atom ""))
 
 retrieveArgList :: Compound -> ArgList
 retrieveArgList comp = case comp of
@@ -50,6 +59,9 @@ retrieveArgList comp = case comp of
 bindVariables :: [Term] -> [Term] -> Map String Term
 bindVariables ruleHead queryBody = Data.Map.fromAscList (zipWith zipTerms ruleHead queryBody)
 
+bindQueryVariables :: [Term] -> [Term] -> Map String Term
+bindQueryVariables ruleHead queryBody = Data.Map.fromAscList (zipWith zipQueryTerms ruleHead queryBody)
+
 createBinding :: (String, Term) -> Binding
 createBinding (name, value) = case value of
   PTAtom atom -> Binding name (atomname atom)
@@ -57,12 +69,57 @@ createBinding (name, value) = case value of
 
 toBindings :: Map String Term -> [Binding]
 toBindings = Prelude.map createBinding . Data.Map.toList
-  
+
+resolveBinding :: Map String Term -> Term -> Term
+resolveBinding resolver value = case value of
+  PTAtom atom -> value
+  PTVariable var -> findWithDefault (PTAtom (Atom "_")) (varname var) resolver -- Is this default correct?
+
+resolveBindings :: Map String Term -> Map String Term -> Map String Term
+resolveBindings orig resolver = Data.Map.map (resolveBinding resolver) orig
+
 mapRule :: Database -> Statement -> Query -> DbValue -> EvalResult
 mapRule db stmt query (DbRule rule) = do
+  let queryVars = bindQueryVariables (retrieveArgList (queryBody query)) (retrieveArgList (ruleHead rule))
   let boundVars = bindVariables (retrieveArgList (ruleHead rule)) (retrieveArgList (queryBody query))
-  EvalResult db [Value [Solution stmt (Just rule) (Right (toBindings boundVars))]]
-mapRule db stmt query other = EvalResult db [Value [Solution stmt Nothing (Left True)]]
+  let result = evalExpr db (apply (ruleBody rule) boundVars) boundVars
+  case result of
+    Just bindings -> EvalResult db [Value [Solution stmt (Just rule) (Right (toBindings (resolveBindings queryVars bindings)))]]
+    Nothing       -> EvalResult db [Value [Solution stmt (Just rule) (Left False)]]
+mapRule db stmt query other = EvalResult db [Value [Solution stmt Nothing (Left False)]]
+
+applyTerm :: Map String Term -> Term -> Term
+applyTerm bindings term = case term of
+  PTAtom atom -> PTAtom atom
+  PTVariable var -> findWithDefault (PTVariable var) (varname var) bindings
+
+applyList :: ProList -> Map String Term -> ProList
+applyList list bindings = case list of
+  PLString string -> PLString string
+  PLTerms  terms  -> PLTerms (Prelude.map (applyTerm bindings) terms)
+
+applyFunctor :: ProFunctor -> Map String Term -> ProFunctor
+applyFunctor func bindings = ProFunctor (funcName func) (Prelude.map (applyTerm bindings) (argList func))
+
+applyCompound :: Compound -> Map String Term -> Compound
+applyCompound comp bindings = case comp of
+  PCProFunctor func -> PCProFunctor (applyFunctor func bindings)
+  PCProList    list -> PCProList (applyList list bindings)
+  PCTerm       term -> PCTerm (applyTerm bindings term)
+
+applyBEoComp :: Either BinaryExpr Compound -> Map String Term -> Either BinaryExpr Compound
+applyBEoComp thing bindings = case thing of
+  Left be -> Left (apply be bindings)
+  Right comp -> Right (applyCompound comp bindings)
+
+apply :: BinaryExpr -> Map String Term -> BinaryExpr
+apply expr bindings = case expr of
+  BEConjunct (left, right) -> BEConjunct ((applyCompound left bindings), (applyBEoComp right bindings))
+  BEDisjunct (left, right) -> BEDisjunct ((applyCompound left bindings), (applyBEoComp right bindings))
+  BEPrimary  prim          -> BEPrimary  (applyCompound prim bindings) 
+
+evalExpr :: Database -> BinaryExpr -> Map String Term -> Maybe (Map String Term)
+evalExpr db expr bindings = Just Data.Map.empty
 
 evalQuery :: Database -> Statement -> Query -> [EvalResult]
 evalQuery db stmt query = 

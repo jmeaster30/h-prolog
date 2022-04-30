@@ -15,6 +15,7 @@ import System.IO ( openFile, hGetContents, IOMode(ReadMode) )
 newtype Variable = Variable {
   varname :: String
 } deriving (Eq, Show)
+
 newtype Atom = Atom {
   atomname :: String
 } deriving (Eq, Show)
@@ -233,7 +234,7 @@ prologRuleFollow = (do {
 
 prologQuery :: Parser Query
 prologQuery = do
-  string "?-"
+  string "?"
   spaces
   result <- Query <$> prologCompound
   char '.'
@@ -317,7 +318,7 @@ printRule rule = do
 
 printQuery :: Query -> IO ()
 printQuery query = do
-  putStr "?- "
+  putStr "?"
   printCompound (queryBody query)
 
 printStatement :: Statement -> IO ()

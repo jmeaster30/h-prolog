@@ -1,6 +1,6 @@
 module Database where
 import Data.Map (Map, empty, findWithDefault, insertWith, toList)
-import Parser (Rule)
+import Parser (Rule, printRule)
 import GHC.IO
 import Data.HashSet
 import Data.Hashable
@@ -28,8 +28,10 @@ getDb = findWithDefault (fromList [DbBool False])
 
 printValue :: DbValue -> IO ()
 printValue val = case val of
-    DbBool bv               -> print bv
-    DbRule r                -> print r
+    DbBool bv -> print bv
+    DbRule r -> do
+      printRule r
+      putStrLn ""
     DbCustomFunction fname  -> putStrLn ("Built-In '" ++ fname ++ "'") 
 
 printCurrentValue :: DbValue -> [DbValue] -> IO ()
