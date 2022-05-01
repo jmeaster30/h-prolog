@@ -21,12 +21,12 @@ initDb cwd =
   setDb (RuleSignature "write" 1)   (DbCustomFunction "write") (
   setDb (RuleSignature "nl" 0)      (DbCustomFunction "nl") (
   setDb (RuleSignature "atom" 1)    (DbCustomFunction "atom") (
-  setDb (RuleSignature "number" 1)  (DbCustomFunction "number") (
-  setDb (RuleSignature "integer" 1) (DbCustomFunction "integer") (
-  setDb (RuleSignature "float" 1)   (DbCustomFunction "float") (
-  setDb (RuleSignature "negate" 1)  (DbCustomFunction "negate") (
+  --setDb (RuleSignature "number" 1)  (DbCustomFunction "number") (
+  --setDb (RuleSignature "integer" 1) (DbCustomFunction "integer") (
+  --setDb (RuleSignature "float" 1)   (DbCustomFunction "float") (
+  --setDb (RuleSignature "negate" 1)  (DbCustomFunction "negate") (
   setDb (RuleSignature "load" 1)   (DbCustomFunction "load")
-  createDb)))))))))))
+  createDb)))))))--))))
 
 loop :: Database -> IO ()
 loop db = do

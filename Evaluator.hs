@@ -82,11 +82,15 @@ mapRule :: Database -> Statement -> Query -> DbValue -> EvalResult
 mapRule db stmt query (DbRule rule) = do
   let queryVars = bindQueryVariables (retrieveArgList (queryBody query)) (retrieveArgList (ruleHead rule))
   let boundVars = bindVariables (retrieveArgList (ruleHead rule)) (retrieveArgList (queryBody query))
-  let result = evalExpr db (apply (ruleBody rule) boundVars) boundVars
-  case result of
-    Just bindings -> EvalResult db [Value [Solution stmt (Just rule) (Right (toBindings (resolveBindings queryVars bindings)))]]
-    Nothing       -> EvalResult db [Value [Solution stmt (Just rule) (Left False)]]
+  EvalResult db [Value (buildResults stmt rule queryVars (evalExpr db (apply (ruleBody rule) boundVars) boundVars))]
 mapRule db stmt query other = EvalResult db [Value [Solution stmt Nothing (Left False)]] --TODO need to fix this for the other db value options
+
+buildResults :: Statement -> Rule -> Map String Term -> [Map String Term] -> [Solution]
+buildResults stmt rule queryVars [] = [Solution stmt (Just rule) (Left False)]
+buildResults stmt rule queryVars [currentBinding] = [Solution stmt (Just rule) (Right (toBindings (resolveBindings queryVars currentBinding)))]
+buildResults stmt rule queryVars (currentBinding:restBinding) = 
+  [Solution stmt (Just rule) (Right (toBindings (resolveBindings queryVars currentBinding)))] ++
+  (buildResults stmt rule queryVars restBinding)
 
 applyTerm :: Map String Term -> Term -> Term
 applyTerm bindings term = case term of
@@ -118,8 +122,8 @@ apply expr bindings = case expr of
   BEDisjunct (left, right) -> BEDisjunct ((applyCompound left bindings), (applyBEoComp right bindings))
   BEPrimary  prim          -> BEPrimary  (applyCompound prim bindings) 
 
-evalExpr :: Database -> BinaryExpr -> Map String Term -> Maybe (Map String Term)
-evalExpr db expr bindings = Just Data.Map.empty
+evalExpr :: Database -> BinaryExpr -> Map String Term -> [Map String Term]
+evalExpr db expr bindings = [Data.Map.empty]
 
 evalQuery :: Database -> Statement -> Query -> [EvalResult]
 evalQuery db stmt query = 
@@ -178,14 +182,10 @@ printBindings (current:rest) = do
 
 printSolution :: Solution -> IO ()
 printSolution sol = do
-  --putStrLn "statement :::::: "
-  --printStatement (statement sol)
-  --putStrLn "rule :::::::"
   case rule sol of
     Nothing -> putStr "nothing"
     Just x -> printRule x
   putStrLn ""
-  --putStrLn "results ::::::"
   case results sol of
     Left b        -> putStr (show b)
     Right binding -> printBindings binding
