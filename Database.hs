@@ -1,6 +1,6 @@
 module Database where
 import Data.Map (Map, empty, findWithDefault, insertWith, toList)
-import Parser (Rule, printRule)
+import Parser
 import GHC.IO
 import Data.HashSet
 import Data.Hashable
@@ -23,8 +23,34 @@ createDb = Data.Map.empty
 setDb :: RuleSignature -> DbValue -> Database -> Database
 setDb rs dbv = insertWith union rs (fromList [dbv])
 
-getDb :: RuleSignature -> Database -> HashSet DbValue
-getDb = findWithDefault (fromList [DbBool False])
+getDb :: RuleSignature -> Database -> [Term] -> HashSet DbValue
+getDb rs db toMatch = Data.HashSet.filter (filterResults toMatch) (findWithDefault (fromList [DbBool False]) rs db)
+
+matchArg :: Term -> Term -> Bool
+matchArg toMatch arg = case toMatch of
+  PTAtom matom -> case arg of
+    PTAtom aatom -> atomname matom == atomname aatom
+    PTVariable avar -> True
+  PTVariable mvar -> True
+
+matchArgList :: [Term] -> ArgList -> Bool
+matchArgList [] [] = True
+matchArgList [] something = False
+matchArgList something [] = False
+matchArgList (currentToMatch:restToMatch) (currentArg:restArgs) =
+  case matchArg currentToMatch currentArg of
+    True -> matchArgList restToMatch restArgs
+    False -> False
+
+filterResults :: [Term] -> DbValue -> Bool
+filterResults toMatch dbValue = case dbValue of
+  DbRule rule -> matchArgList toMatch (retrieveArgList (ruleHead rule))
+
+retrieveArgList :: Compound -> ArgList
+retrieveArgList comp = case comp of
+  PCProFunctor func -> argList func
+  PCProList list -> [] --I don't think this is right
+  PCTerm term -> []
 
 printValue :: DbValue -> IO ()
 printValue val = case val of

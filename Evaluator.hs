@@ -1,6 +1,6 @@
 module Evaluator where
 
-import Database ( Database, setDb, RuleSignature (RuleSignature), DbValue (DbRule), getDb )
+import Database
 import Parser
 import Text.Parsec (ParseError)
 import System.Console.Terminfo (restoreDefaultColors)
@@ -44,23 +44,22 @@ zipQueryTerms a b = case a of
 zipTerms :: Term -> Term -> (String, Term)
 zipTerms a b = case a of
   PTAtom aatom -> case b of
-    PTAtom batom -> ("", PTAtom (Atom ""))
+    PTAtom batom -> if atomname aatom == atomname batom then (atomname aatom, PTAtom batom) else ("", PTAtom (Atom ""))
     PTVariable bvar -> ("", PTAtom (Atom ""))
   PTVariable avar -> case b of
     PTAtom batom -> (varname avar, PTAtom batom)
     PTVariable bvar -> ("", PTAtom (Atom ""))
 
-retrieveArgList :: Compound -> ArgList
-retrieveArgList comp = case comp of
-  PCProFunctor func -> argList func
-  PCProList list -> [] --I don't think this is right
-  PCTerm term -> []
+filterEmptyTerms :: (String, Term) -> Bool
+filterEmptyTerms (first, second) = case first of
+  [] -> False
+  other -> True
 
 bindVariables :: [Term] -> [Term] -> Map String Term
-bindVariables ruleHead queryBody = Data.Map.fromAscList (zipWith zipTerms ruleHead queryBody)
+bindVariables ruleHead queryBody = Data.Map.fromAscList (Prelude.filter (filterEmptyTerms) (zipWith zipTerms ruleHead queryBody))
 
 bindQueryVariables :: [Term] -> [Term] -> Map String Term
-bindQueryVariables ruleHead queryBody = Data.Map.fromAscList (zipWith zipQueryTerms ruleHead queryBody)
+bindQueryVariables ruleHead queryBody = Data.Map.fromAscList (Prelude.filter (filterEmptyTerms) (zipWith zipQueryTerms ruleHead queryBody))
 
 createBinding :: (String, Term) -> Binding
 createBinding (name, value) = case value of
@@ -128,7 +127,7 @@ evalExpr db expr bindings = [Data.Map.empty]
 evalQuery :: Database -> Statement -> Query -> [EvalResult]
 evalQuery db stmt query = 
   case getFunctionSignature db stmt (queryBody query) of
-    Left rulesig -> Prelude.map (mapRule db stmt query) (Data.HashSet.toList (getDb rulesig db))
+    Left rulesig -> Prelude.map (mapRule db stmt query) (Data.HashSet.toList (getDb rulesig db (retrieveArgList (queryBody query))))
     Right error -> [EvalResult db [Error (Right error)]]
 
 validateExpr :: BinaryExpr -> Maybe String
@@ -158,8 +157,8 @@ eval db stmt = case stmt of
   PSRule rule -> evalRule db stmt rule
 
 evalStep :: Database -> Statement -> [Statement] -> [EvalResult]
-evalStep db_ current rest = do
-  let currentResult = eval db_ current
+evalStep db current rest = do
+  let currentResult = eval db current
   let restResult = iterateProgram (resultDb (head currentResult)) rest
   currentResult ++ restResult
 
@@ -167,6 +166,11 @@ iterateProgram :: Database -> [Statement] -> [EvalResult]
 iterateProgram db stmts = case stmts of
   []              -> []
   (current:rest)  -> evalStep db current rest
+
+loadProgram :: Database -> [Statement] -> Database
+loadProgram db stmts = case stmts of
+  [] -> db
+  (current:rest) -> loadProgram (resultDb (head (eval db current))) rest
 
 evalProlog :: Database -> Either ParseError Program -> [EvalResult]
 evalProlog db ast = case ast of
@@ -177,7 +181,7 @@ evalProlog db ast = case ast of
 printBindings :: [Binding] -> IO ()
 printBindings [] = putStrLn "End Binding"
 printBindings (current:rest) = do
-  putStrLn (name current ++ " = " ++ value current)
+  putStrLn (Evaluator.name current ++ " = " ++ value current)
   printBindings rest
 
 printSolution :: Solution -> IO ()

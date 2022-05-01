@@ -247,7 +247,7 @@ prologStatement = do
 
 prologProgram :: Parser Program
 prologProgram = do
-  sepBy prologStatement (many (do { spaces; char '\n'}))
+  sepBy prologStatement (many (char '\n'))
 
 -- AST printers
 
@@ -329,3 +329,7 @@ printStatement (PSQuery query) = do
   printQuery query
   putStrLn "."
 
+debugPrint :: Either ParseError Program -> IO ()
+debugPrint test = case test of
+  Left error -> print error
+  Right prog -> putStrLn "good :)"
