@@ -43,8 +43,8 @@ data Compound
   deriving (Eq, Show)
 
 data BinaryExpr
-  = BEConjunct (Compound, Either BinaryExpr Compound)
-  | BEDisjunct (Compound, Either BinaryExpr Compound)
+  = BEConjunct (Compound, BinaryExpr)
+  | BEDisjunct (Compound, BinaryExpr)
   | BEPrimary  Compound
   deriving (Eq, Show)
 
@@ -196,13 +196,13 @@ prologBinaryFollow head = (do {
   spaces;
   next <- prologCompound;
   follow <- prologBinaryFollow next;
-  return (BEConjunct (head, Left follow))
+  return (BEConjunct (head, follow))
 }) <|> (do {
   string ";";
   spaces;
   next <- prologCompound;
   follow <- prologBinaryFollow next;
-  return (BEConjunct (head, Left follow))
+  return (BEDisjunct (head, follow))
 }) <|> (do {
   return (BEPrimary head)
 })
@@ -298,16 +298,12 @@ printCompound (PCTerm term) = printTerm term
 printPBinaryExpr :: BinaryExpr -> IO ()
 printPBinaryExpr (BEConjunct (head, next)) = do
   printCompound head
-  putStr ","
-  case next of
-    Left binaryExpr -> printPBinaryExpr binaryExpr
-    Right comp -> printCompound comp
+  putStr ", "
+  printPBinaryExpr next
 printPBinaryExpr (BEDisjunct (head, next)) = do
   printCompound head
-  putStr ";"
-  case next of
-    Left binaryExpr -> printPBinaryExpr binaryExpr
-    Right comp -> printCompound comp
+  putStr "; "
+  printPBinaryExpr next
 printPBinaryExpr (BEPrimary comp) = printCompound comp
 
 printRule :: Rule -> IO ()

@@ -110,19 +110,18 @@ applyCompound comp bindings = case comp of
   PCProList    list -> PCProList (applyList list bindings)
   PCTerm       term -> PCTerm (applyTerm bindings term)
 
-applyBEoComp :: Either BinaryExpr Compound -> Map String Term -> Either BinaryExpr Compound
-applyBEoComp thing bindings = case thing of
-  Left be -> Left (apply be bindings)
-  Right comp -> Right (applyCompound comp bindings)
-
 apply :: BinaryExpr -> Map String Term -> BinaryExpr
 apply expr bindings = case expr of
-  BEConjunct (left, right) -> BEConjunct ((applyCompound left bindings), (applyBEoComp right bindings))
-  BEDisjunct (left, right) -> BEDisjunct ((applyCompound left bindings), (applyBEoComp right bindings))
+  BEConjunct (left, right) -> BEConjunct ((applyCompound left bindings), (apply right bindings))
+  BEDisjunct (left, right) -> BEDisjunct ((applyCompound left bindings), (apply right bindings))
   BEPrimary  prim          -> BEPrimary  (applyCompound prim bindings) 
 
 evalExpr :: Database -> BinaryExpr -> Map String Term -> [Map String Term]
-evalExpr db expr bindings = [Data.Map.empty]
+evalExpr db expr bindings = 
+  case expr of
+    BEConjunct (lhs, rhs) -> [Data.Map.empty]
+    BEDisjunct (lhs, rhs) -> [Data.Map.empty]
+    BEPrimary  prim       -> [Data.Map.empty]
 
 evalQuery :: Database -> Statement -> Query -> [EvalResult]
 evalQuery db stmt query = 
