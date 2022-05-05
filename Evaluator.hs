@@ -16,7 +16,7 @@ data Binding = Binding {
 } deriving (Eq, Show)
 
 data Solution = Solution {
-  statement :: Statement,
+  statement :: Maybe Statement,
   rule :: Maybe Rule,
   results :: Either Bool [Binding]
 } deriving (Eq, Show)
@@ -82,13 +82,13 @@ mapRule db stmt query (DbRule rule) = do
   let queryVars = bindQueryVariables (retrieveArgList (queryBody query)) (retrieveArgList (ruleHead rule))
   let boundVars = bindVariables (retrieveArgList (ruleHead rule)) (retrieveArgList (queryBody query))
   EvalResult db [Value (buildResults stmt rule queryVars (evalExpr db (apply (ruleBody rule) boundVars) boundVars))]
-mapRule db stmt query other = EvalResult db [Value [Solution stmt Nothing (Left False)]] --TODO need to fix this for the other db value options
+mapRule db stmt query other = EvalResult db [Value [Solution (Just stmt) Nothing (Left False)]] --TODO need to fix this for the other db value options
 
 buildResults :: Statement -> Rule -> Map String Term -> [Map String Term] -> [Solution]
-buildResults stmt rule queryVars [] = [Solution stmt (Just rule) (Left False)]
-buildResults stmt rule queryVars [currentBinding] = [Solution stmt (Just rule) (Right (toBindings (resolveBindings queryVars currentBinding)))]
+buildResults stmt rule queryVars [] = [Solution (Just stmt) (Just rule) (Left False)]
+buildResults stmt rule queryVars [currentBinding] = [Solution (Just stmt) (Just rule) (Right (toBindings (resolveBindings queryVars currentBinding)))]
 buildResults stmt rule queryVars (currentBinding:restBinding) = 
-  [Solution stmt (Just rule) (Right (toBindings (resolveBindings queryVars currentBinding)))] ++
+  [Solution (Just stmt) (Just rule) (Right (toBindings (resolveBindings queryVars currentBinding)))] ++
   (buildResults stmt rule queryVars restBinding)
 
 applyTerm :: Map String Term -> Term -> Term
@@ -126,7 +126,9 @@ evalExpr db expr bindings =
 evalQuery :: Database -> Statement -> Query -> [EvalResult]
 evalQuery db stmt query = 
   case getFunctionSignature db stmt (queryBody query) of
-    Left rulesig -> Prelude.map (mapRule db stmt query) (Data.HashSet.toList (getDb rulesig db (retrieveArgList (queryBody query))))
+    Left rulesig -> case (Data.HashSet.toList (getDb rulesig db (retrieveArgList (queryBody query)))) of
+        []    -> [EvalResult db [Value [Solution Nothing Nothing (Left False)]]]
+        other -> Prelude.map (mapRule db stmt query) other
     Right error -> [EvalResult db [Error (Right error)]]
 
 validateExpr :: BinaryExpr -> Maybe String
@@ -137,18 +139,18 @@ getFunctionSignature :: Database -> Statement -> Compound -> Either RuleSignatur
 getFunctionSignature db stmt head =
   case head of
     PCProFunctor func -> case funcName func of
-        PTAtom atom -> Left (RuleSignature (atomname atom) (length (argList func)))
+        PTAtom atom    -> Left (RuleSignature (atomname atom) (length (argList func)))
         PTVariable var -> Right "Rule head cannot be a variable"
     PCProList list -> Right "Rule head cannot be a list"
     PCTerm term -> case term of
-      PTAtom atom -> Left (RuleSignature (atomname atom) 0)
+      PTAtom atom    -> Left (RuleSignature (atomname atom) 0)
       PTVariable var -> Right "Rule head cannot be a variable"
 
 evalRule :: Database -> Statement -> Rule -> [EvalResult]
 evalRule db stmt rule = do
   case getFunctionSignature db stmt (ruleHead rule) of
     Right error -> [EvalResult db [Error (Right error)]]
-    Left rulesig -> [EvalResult (setDb rulesig (DbRule rule) db) [Value [Solution stmt Nothing (Left True)]]]
+    Left rulesig -> [EvalResult (setDb rulesig (DbRule rule) db) [Value [Solution (Just stmt) Nothing (Left True)]]]
 
 eval :: Database -> Statement -> [EvalResult]
 eval db stmt = case stmt of
@@ -156,14 +158,17 @@ eval db stmt = case stmt of
   PSRule rule -> evalRule db stmt rule
 
 evalStep :: Database -> Statement -> [Statement] -> [EvalResult]
-evalStep db current rest = do
+evalStep db current [] = eval db current
+evalStep db current (headRest:tailRest) = do
   let currentResult = eval db current
-  let restResult = iterateProgram (resultDb (head currentResult)) rest
-  currentResult ++ restResult
+  restResult <- case currentResult of
+      []         -> evalStep db headRest tailRest
+      (top:next) -> evalStep (resultDb top) headRest tailRest
+  currentResult ++ [restResult]
 
 iterateProgram :: Database -> [Statement] -> [EvalResult]
 iterateProgram db stmts = case stmts of
-  []              -> []
+  []              -> [EvalResult db [Value [Solution Nothing Nothing (Left False)]]]
   (current:rest)  -> evalStep db current rest
 
 loadProgram :: Database -> [Statement] -> Database
